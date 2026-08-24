@@ -11,7 +11,7 @@ interface NewPlaylistDialogProps {
 }
 
 type StartMode = 'empty' | 'import';
-type ImportTab = 'url' | 'file';
+type ImportTab = 'url' | 'file' | 'xtream';
 
 export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlaylistDialogProps) {
   const { accentColor } = useStore();
@@ -21,6 +21,11 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Xtream Codes import fields
+  const [xtreamUrl, setXtreamUrl] = useState('');
+  const [xtreamUsername, setXtreamUsername] = useState('');
+  const [xtreamPassword, setXtreamPassword] = useState('');
 
   // null = not yet checked, string = warning to show, and a boolean tracking whether
   // the user has already seen it and clicked through once (so the next submit proceeds anyway).
@@ -36,6 +41,9 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
       setUrl('');
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      setXtreamUrl('');
+      setXtreamUsername('');
+      setXtreamPassword('');
       setWarning(null);
       setWarningConfirmed(false);
       setIsSubmitting(false);
@@ -53,6 +61,7 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
     if (!name.trim()) return false;
     if (mode === 'empty') return true;
     if (importTab === 'url') return url.trim() !== '';
+    if (importTab === 'xtream') return xtreamUrl.trim() !== '' && xtreamUsername.trim() !== '' && xtreamPassword.trim() !== '';
     return file !== null;
   };
 
@@ -76,12 +85,18 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
 
     setIsSubmitting(true);
     try {
-      const payload: { name: string; url?: string; content?: string; confirmWarning?: boolean } = {
+      const payload: { name: string; url?: string; content?: string; confirmWarning?: boolean; xtream?: { url: string; username: string; password: string } } = {
         name: name.trim(),
         confirmWarning: warningConfirmed,
       };
       if (importTab === 'url') {
         payload.url = url.trim();
+      } else if (importTab === 'xtream') {
+        payload.xtream = {
+          url: xtreamUrl.trim(),
+          username: xtreamUsername.trim(),
+          password: xtreamPassword,
+        };
       } else if (file) {
         payload.content = await file.text();
       }
@@ -131,7 +146,7 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
             onClick={() => setMode('import')}
             className={`flex-1 pb-2 text-sm font-medium ${mode === 'import' ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'} relative`}
           >
-            Import M3U
+            Import Playlist
             {mode === 'import' && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ backgroundColor: accentColor }} />
             )}
@@ -174,6 +189,14 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
                 >
                   From File
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setImportTab('xtream'); resetImportInputs(); }}
+                  className={importTab === 'xtream' ? '' : 'text-gray-500 dark:text-gray-400'}
+                  style={importTab === 'xtream' ? { color: accentColor } : undefined}
+                >
+                  Xtream Codes
+                </button>
               </div>
 
               {importTab === 'url' ? (
@@ -191,7 +214,7 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
                   />
                   <p className="text-[10px] text-gray-500 mt-1">Supports M3U and XSPF playlists — not M3U8 livestream links</p>
                 </div>
-              ) : (
+              ) : importTab === 'file' ? (
                 <div>
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">File</label>
                   <input
@@ -205,6 +228,49 @@ export default function NewPlaylistDialog({ open, onClose, onCreated }: NewPlayl
                     onBlur={(e) => (e.target.style.borderColor = '')}
                   />
                 </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Server URL</label>
+                    <input
+                      type="url"
+                      placeholder="http://example.com:8080"
+                      value={xtreamUrl}
+                      onChange={(e) => { setXtreamUrl(e.target.value); resetImportInputs(); }}
+                      className={inputClasses}
+                      style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
+                      onFocus={(e) => (e.target.style.borderColor = accentColor)}
+                      onBlur={(e) => (e.target.style.borderColor = '')}
+                    />
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Username</label>
+                      <input
+                        type="text"
+                        value={xtreamUsername}
+                        onChange={(e) => { setXtreamUsername(e.target.value); resetImportInputs(); }}
+                        className={inputClasses}
+                        style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
+                        onFocus={(e) => (e.target.style.borderColor = accentColor)}
+                        onBlur={(e) => (e.target.style.borderColor = '')}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Password</label>
+                      <input
+                        type="password"
+                        value={xtreamPassword}
+                        onChange={(e) => { setXtreamPassword(e.target.value); resetImportInputs(); }}
+                        className={inputClasses}
+                        style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
+                        onFocus={(e) => (e.target.style.borderColor = accentColor)}
+                        onBlur={(e) => (e.target.style.borderColor = '')}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-gray-500 -mt-2">Pulls in every live channel from this Xtream Codes account</p>
+                </>
               )}
 
               {warning && (
