@@ -53,7 +53,7 @@ npm install -g pm2
 ### 3. Run the app
 <b>3a. Clone the source via git:</b>
 ```
-git clone https://github.com/andrei-savin/m3u4me.git
+git clone https://github.com/vanbasterkodi/m3u4me.git
 ```
 <b>3b. Navigate into the folder:</b>
 ```
