@@ -37,7 +37,7 @@ export default function SettingsPage() {
   const [authStatusError, setAuthStatusError] = useState(false);
   
   const versionInfo = useVersionInfo();
-  const GITHUB_REPO = 'https://github.com/andrei-savin/m3u4me';
+  const GITHUB_REPO = 'https://github.com/vanbasterkodi/m3u4me';
   const BMC_URL = 'https://www.buymeacoffee.com/savinandrei';
   const BMC_YELLOW = '#FFDD00';
 
