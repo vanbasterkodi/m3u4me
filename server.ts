@@ -258,11 +258,15 @@ async function refreshEpgSourcesSequentially(sourceIds: string[]) {
 // ── Channel Pool Cache and Functions ─────────────────────────────────────
 const channelPoolCache = new Map<string, ChannelPoolEntry[]>();
 
-async function fetchXtreamChannels(source: ChannelPoolSource): Promise<ChannelPoolEntry[]> {
-  if (!source.url || !source.xtreamCredentials) return [];
-  const baseUrl = source.url.replace(/\/$/, '');
-  const { username, password } = source.xtreamCredentials;
-  
+/**
+ * Fetches an Xtream Codes account's live channels (categories + streams) and returns them as
+ * ChannelPoolEntry-shaped records. Shared by the channel-pool "Xtream" source refresh and the
+ * "New Playlist > Xtream Codes" import flow, which has no source record of its own and passes
+ * a synthetic `sourceId` (e.g. "import").
+ */
+async function fetchXtreamLiveEntries(rawUrl: string, username: string, password: string, sourceId: string): Promise<ChannelPoolEntry[]> {
+  const baseUrl = rawUrl.replace(/\/$/, '');
+
   const catRes = await fetch(`${baseUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_categories`);
   if (!catRes.ok) throw new Error(`Failed to fetch categories: ${catRes.statusText}`);
   const catData = await catRes.json();
@@ -291,7 +295,7 @@ async function fetchXtreamChannels(source: ChannelPoolSource): Promise<ChannelPo
   for (const s of streamsData) {
     entries.push({
       id: uuidv4(),
-      sourceId: source.id,
+      sourceId,
       name: s.name || 'Unknown',
       url: `${baseUrl}/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${s.stream_id}.ts`,
       logo: s.stream_icon || null,
@@ -300,6 +304,12 @@ async function fetchXtreamChannels(source: ChannelPoolSource): Promise<ChannelPo
     });
   }
   return entries;
+}
+
+async function fetchXtreamChannels(source: ChannelPoolSource): Promise<ChannelPoolEntry[]> {
+  if (!source.url || !source.xtreamCredentials) return [];
+  const { username, password } = source.xtreamCredentials;
+  return fetchXtreamLiveEntries(source.url, username, password, source.id);
 }
 
 function parseM3uToChannelPoolEntries(content: string, sourceId: string): ChannelPoolEntry[] {
@@ -723,7 +733,7 @@ async function startServer() {
     next();
   });
 
-  // ── Auth routes ────────────────────────────────────────────────────
+  // ── Auth routes ──────────────────────────────────────────────────────
   app.get('/api/auth/status', (_req, res) => {
     const auth = readAuth();
     res.json({ enabled: !!auth });
@@ -831,7 +841,7 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // ── EPG Routes ───────────────────────────────────────────────────────
+  // ── EPG Routes ──────────────────────────────────────────────────────────
   app.get("/api/epg-sources", (req, res) => {
     res.json(readDb().epgSources);
   });
@@ -978,7 +988,7 @@ async function startServer() {
     res.json(result);
   });
 
-  // ── Channel Pool Routes ───────────────────────────────────────────────────────
+  // ── Channel Pool Routes ──────────────────────────────────────────────────
   app.get("/api/channel-pool/sources", (req, res) => {
     res.json(readDb().channelPoolSources);
   });
@@ -1210,59 +1220,82 @@ async function startServer() {
     res.json(newPlaylist);
   });
 
-  // Creates a playlist pre-populated from an existing M3U/XSPF playlist, given either a URL
-  // to fetch or raw file content. Rejects (with a warning the caller can confirm past, mirroring
-  // the channel-pool "Add Source" flow) anything that looks like a raw stream link rather than
-  // an actual channel playlist — e.g. an M3U8 livestream/VOD segment feed.
+  // Creates a playlist pre-populated from an existing M3U/XSPF playlist (given either a URL
+  // to fetch or raw file content) or from an Xtream Codes account's live channels (given a
+  // server URL + username + password). Rejects (with a warning the caller can confirm past,
+  // mirroring the channel-pool "Add Source" flow) anything that looks like a raw stream link
+  // rather than an actual channel playlist — e.g. an M3U8 livestream/VOD segment feed. That
+  // heuristic only applies to the M3U/XSPF path; an Xtream login is validated by the API calls
+  // themselves, so there's nothing to sniff-warn about there.
   app.post("/api/playlists/import", async (req, res) => {
-    const { name, url, content: rawContent, confirmWarning } = req.body;
+    const { name, url, content: rawContent, confirmWarning, xtream } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: "Missing playlist name" });
     }
-    if (!url && !rawContent) {
-      return res.status(400).json({ error: "Provide a URL or a file to import from" });
+
+    const xtreamUrl = xtream?.url ? String(xtream.url).trim() : '';
+    const xtreamUsername = xtream?.username ? String(xtream.username).trim() : '';
+    const xtreamPassword = xtream?.password ? String(xtream.password) : '';
+    const isXtreamImport = !!(xtreamUrl || xtreamUsername || xtreamPassword);
+
+    if (!isXtreamImport && !url && !rawContent) {
+      return res.status(400).json({ error: "Provide a URL, a file, or Xtream Codes credentials to import from" });
     }
 
-    let content: string;
-    if (url) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-        let response;
-        try {
-          response = await fetch(url, {
-            signal: controller.signal,
-            headers: { 'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16', 'Accept': '*/*' },
-          });
-        } catch {
-          clearTimeout(timeout);
-          return res.status(400).json({ error: "Could not fetch that URL" });
-        }
+    let entries: ChannelPoolEntry[];
 
-        // Content-Type is not a reliable signal here — real playlist servers commonly
-        // label M3U playlists as audio/x-mpegurl (this app's own export does too, see
-        // serveM3U), so a Content-Type-based short-circuit produces false positives on
-        // genuine multi-channel playlists. Inspect the actual body instead via
-        // detectPlaylistWarning() below, which distinguishes playlists from single-stream
-        // HLS/binary content far more accurately.
-        content = await response.text();
-        clearTimeout(timeout);
-      } catch {
-        return res.status(400).json({ error: "Could not fetch that URL" });
+    if (isXtreamImport) {
+      if (!xtreamUrl || !xtreamUsername || !xtreamPassword) {
+        return res.status(400).json({ error: "Server URL, username and password are all required for Xtream Codes" });
+      }
+      try {
+        entries = await fetchXtreamLiveEntries(xtreamUrl, xtreamUsername, xtreamPassword, 'import');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return res.status(400).json({ error: message });
       }
     } else {
-      content = String(rawContent);
-    }
+      let content: string;
+      if (url) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
+          let response;
+          try {
+            response = await fetch(url, {
+              signal: controller.signal,
+              headers: { 'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16', 'Accept': '*/*' },
+            });
+          } catch {
+            clearTimeout(timeout);
+            return res.status(400).json({ error: "Could not fetch that URL" });
+          }
 
-    const warning = detectPlaylistWarning(content);
-    if (warning && !confirmWarning) {
-      return res.json({ warning });
-    }
+          // Content-Type is not a reliable signal here — real playlist servers commonly
+          // label M3U playlists as audio/x-mpegurl (this app's own export does too, see
+          // serveM3U), so a Content-Type-based short-circuit produces false positives on
+          // genuine multi-channel playlists. Inspect the actual body instead via
+          // detectPlaylistWarning() below, which distinguishes playlists from single-stream
+          // HLS/binary content far more accurately.
+          content = await response.text();
+          clearTimeout(timeout);
+        } catch {
+          return res.status(400).json({ error: "Could not fetch that URL" });
+        }
+      } else {
+        content = String(rawContent);
+      }
 
-    const isXspf = content.trim().startsWith('<?xml') && content.includes('<playlist');
-    const entries = isXspf
-      ? parseXspfToChannelPoolEntries(content, 'import')
-      : parseM3uToChannelPoolEntries(content, 'import');
+      const warning = detectPlaylistWarning(content);
+      if (warning && !confirmWarning) {
+        return res.json({ warning });
+      }
+
+      const isXspf = content.trim().startsWith('<?xml') && content.includes('<playlist');
+      entries = isXspf
+        ? parseXspfToChannelPoolEntries(content, 'import')
+        : parseM3uToChannelPoolEntries(content, 'import');
+    }
 
     if (entries.length === 0) {
       return res.status(400).json({ error: "No channels found in that playlist" });
