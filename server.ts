@@ -733,7 +733,7 @@ async function startServer() {
     next();
   });
 
-    // ── Auth routes ────────────────────────────────────────────────────
+  // ── Auth routes ────────────────────────────────────────────────────
   app.get('/api/auth/status', (_req, res) => {
     const auth = readAuth();
     res.json({ enabled: !!auth });
@@ -841,7 +841,7 @@ async function startServer() {
 
   // --- API Routes ---
 
-    // ── EPG Routes ───────────────────────────────────────────────────────
+  // ── EPG Routes ───────────────────────────────────────────────────────
   app.get("/api/epg-sources", (req, res) => {
     res.json(readDb().epgSources);
   });
@@ -988,7 +988,7 @@ async function startServer() {
     res.json(result);
   });
 
-    // ── Channel Pool Routes ───────────────────────────────────────────────────────
+  // ── Channel Pool Routes ───────────────────────────────────────────────────────
   app.get("/api/channel-pool/sources", (req, res) => {
     res.json(readDb().channelPoolSources);
   });
