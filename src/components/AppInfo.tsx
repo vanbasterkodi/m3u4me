@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-const GITHUB_API_LATEST = 'https://api.github.com/repos/andrei-savin/m3u4me/releases/latest';
+const GITHUB_API_LATEST = 'https://api.github.com/repos/vanbasterkodi/m3u4me/releases/latest';
 
 interface VersionInfo {
   current: string;
