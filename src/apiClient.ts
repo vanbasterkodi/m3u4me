@@ -178,7 +178,7 @@ export const triggerChannelPoolRefresh = () => channelPoolEvents.dispatchEvent(n
 export const api = {
   getPlaylists: () => authFetch('/api/playlists').then(r => r.json()),
   createPlaylist: (name: string) => authFetch('/api/playlists', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) }).then(r=>r.json()),
-  importPlaylist: (data: { name: string; url?: string; content?: string; confirmWarning?: boolean }) =>
+  importPlaylist: (data: { name: string; url?: string; content?: string; confirmWarning?: boolean; xtream?: { url: string; username: string; password: string } }) =>
     authFetch('/api/playlists/import', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }).then(r => r.json()) as Promise<Playlist | { warning: string } | { error: string }>,
   updatePlaylist: (playlistId: string, updates: any) => authFetch(`/api/playlists/${playlistId}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(updates) }),
   deletePlaylist: (playlistId: string) => authFetch(`/api/playlists/${playlistId}`, { method: 'DELETE' }),
